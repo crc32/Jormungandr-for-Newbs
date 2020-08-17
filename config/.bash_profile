@@ -1,32 +1,106 @@
 export ARCHFLAGS="-arch x86_64"
 test -f ~/.bashrc && source ~/.bashrc
 
-function start() {
-    GREEN=$(printf "\033[0;32m")
-    nohup jormungandr --config ~/files/node-config.yaml --genesis-block-hash $GENESIS_BLOCK_HASH >> ~/logs/node.out 2>&1 &
-    echo ${GREEN}$(ps | grep jormungandr)
+function run-relay() {
+    nohup cardano-node run \
+    --topology ~/node-files/mainnet-topology.json \
+    --database-path ~/node-files/db \
+    --socket-path ~/node-files/node.socket \
+    --host-addr $PUBLIC_IP_ADDR \
+    --port $REST_PORT \
+    --config ~/node-files/mainnet-config.json 2>&1 &
 }
 
-function stop() {
-    echo "$(jcli rest v0 shutdown get -h http://127.0.0.1:${REST_PORT}/api)"
+function run-node() {
+    nohup cardano-node run \
+    --topology ~/node-files/mainnet-topology.json \
+    --database-path ~/node-files/db \
+    --socket-path ~/node-files/node.socket \
+    --host-addr $PUBLIC_IP_ADDR \
+    --port $REST_PORT \
+    --config ~/node-files/mainnet-config.json \
+    --shelley-kes-key ~/node-files/kes.skey \
+    --shelley-vrf-key ~/node-files/vrf.skey \
+    --shelley-operational-certificate ~/node-files/node.cert 2>&1 &
 }
 
-function stats() {
-    echo "$(jcli rest v0 node stats get -h http://127.0.0.1:${REST_PORT}/api)"
+function generate_payment_keys() {
+    cardano-cli shelley address key-gen \
+    --verification-key-file ~/node-files/payment.vkey \
+    --signing-key-file ~/node-files/payment.skey
 }
 
-function tcp_stats() {
-    cat /proc/net/netstat | awk '(f==0) { i=1; while ( i<=NF) {n[i] = $i; i++ }; f=1; next} \
-    (f==1){ i=2; while ( i<=NF){ printf "%s = %d\n", n[i], $i; i++}; f=0}'
+function generate_stake_keys() {
+    cardano-cli shelley stake-address key-gen \
+    --verification-key-file ~/node-files/stake.vkey \
+    --signing-key-file ~/node-files/stake.skey
 }
 
-function bal() {
-    echo "$(jcli rest v0 account get $(cat ~/files/receiver_account.txt) -h http://127.0.0.1:${REST_PORT}/api)"
+function generate_pmt_address() {
+    cardano-cli shelley address build \
+    --payment-verification-key-file ~/node-files/payment.vkey \
+    --stake-verification-key-file ~/node-files/stake.vkey \
+    --out-file ~/node-files/payment.addr \
+    --mainnet
 }
 
-function get_ip() {
-    echo "${PUBLIC_IP_ADDR}"
+function generate_stake_address() {
+    cardano-cli shelley stake-address build \
+    --stake-verification-key-file ~/node-files/stake.vkey \
+    --out-file ~/node-files/stake.addr \
+    --mainnet
 }
+
+function generate_cold_keys() {
+    cardano-cli shelley node key-gen \
+    --cold-verification-key-file ~/node-files/cold.vkey \
+    --cold-signing-key-file ~/node-files/cold.skey \
+    --operational-certificate-issue-counter-file ~/node-files/cold.counter
+    echo "YOU SHOULD MOVE THESE KEYS TO AN OFFLINE DEVICE IMMEDIATELY"
+}
+
+function generate_vrf_keys() {
+    cardano-cli shelley node key-gen-VRF \
+    --verification-key-file ~/node-files/vrf.vkey \
+    --signing-key-file ~/node-files/vrf.skey
+}
+
+function generate_kes_keys() {
+    cardano-cli shelley node key-gen-KES \
+    --verification-key-file ~/node-files/kes.vkey \
+    --signing-key-file ~/node-files/kes.skey
+}
+
+function get-ip() {
+    dig @resolver1.opendns.com ANY myip.opendns.com +short
+}
+
+#function start() {
+#    GREEN=$(printf "\033[0;32m")
+#    nohup jormungandr --config ~/files/node-config.yaml --genesis-block-hash $GENESIS_BLOCK_HASH >> ~/logs/node.out 2>&1 &
+#    echo ${GREEN}$(ps | grep jormungandr)
+#}
+#
+#function stop() {
+#    echo "$(jcli rest v0 shutdown get -h http://127.0.0.1:${REST_PORT}/api)"
+#}
+#
+#function stats() {
+#    echo "$(jcli rest v0 node stats get -h http://127.0.0.1:${REST_PORT}/api)"
+#}
+#
+#function tcp_stats() {
+#    cat /proc/net/netstat | awk '(f==0) { i=1; while ( i<=NF) {n[i] = $i; i++ }; f=1; next} \
+#    (f==1){ i=2; while ( i<=NF){ printf "%s = %d\n", n[i], $i; i++}; f=0}'
+#}
+#
+#function bal() {
+#    echo "$(jcli rest v0 account get $(cat ~/files/receiver_account.txt) -h http://127.0.0.1:${REST_PORT}/api)"
+#}
+#
+#function get_ip() {
+#    echo "${PUBLIC_IP_ADDR}"
+#}
 
 function get_pid() {
     ps auxf | grep jor
@@ -57,18 +131,18 @@ function num_open_files() {
     echo "$(lsof -u $(whoami) | wc -l)"
 }
 
-function is_pool_visible() {
-    GREEN=$(printf "\033[0;32m")
-    stake_pool_id="$(cat ~/files/node_secret.yaml | grep node_id | awk -F: '{print $2 }')"
-    echo "Display my stake pool id if it is visible on the blockchain. Otherwise, return nothing."
-    echo ${GREEN}$(jcli rest v0 stake-pools get --host "http://127.0.0.1:${REST_PORT}/api" | grep $stake_pool_id)
-}
-
-function start_leader() {
-    GREEN=$(printf "\033[0;32m")
-    nohup jormungandr --config ~/files/node-config.yaml --secret ~/files/node_secret.yaml --genesis-block-hash ${GENESIS_BLOCK_HASH} >> ~/logs/node.out 2>&1 &
-    echo "${GREEN}$(ps | grep jormungandr)"
-}
+#function is_pool_visible() {
+#    GREEN=$(printf "\033[0;32m")
+#    stake_pool_id="$(cat ~/files/node_secret.yaml | grep node_id | awk -F: '{print $2 }')"
+#    echo "Display my stake pool id if it is visible on the blockchain. Otherwise, return nothing."
+#    echo ${GREEN}$(jcli rest v0 stake-pools get --host "http://127.0.0.1:${REST_PORT}/api" | grep $stake_pool_id)
+#}
+#
+#function start_leader() {
+#    GREEN=$(printf "\033[0;32m")
+#    nohup jormungandr --config ~/files/node-config.yaml --secret ~/files/node_secret.yaml --genesis-block-hash ${GENESIS_BLOCK_HASH} >> ~/logs/node.out 2>&1 &
+#    echo "${GREEN}$(ps | grep jormungandr)"
+#}
 
 function logs() {
     tail -n 60 ~/logs/node.out
@@ -78,36 +152,36 @@ function empty_logs() {
     > ~/logs/node.out
 }
 
-function check_peers() {
-    sed -e '/ address/!d' -e '/#/d' -e 's@^.*/ip./\([^/]*\)/tcp/\([0-9]*\).*@\1 \2@' ~/files/node-config.yaml | \
-    while read addr port
-    do 
-        tcpping -x 1 $addr $port
-    done
-}
-
-function leader_logs() {
-    echo "Has this node been scheduled to be leader?"
-    echo "$(jcli rest v0 leaders logs get -h http://127.0.0.1:${REST_PORT}/api)"
-}
-
-function schedule() {
-    echo "Which block dates are this node scheduled to generate a block during this epoch?"
-    leader_logs | grep scheduled_at_date | cut -d'"' -f2 | cut -d'.' -f2 | sort -g
-}
-
-function when() {
-    leader_logs | grep scheduled_at_time | sort
-}
-
-function elections() {
-    echo "How many slots has this node been scheduled to be leader?"
-    echo "$(jcli rest v0 leaders logs get -h http://127.0.0.1:${REST_PORT}/api | grep created_at_time | wc -l)"
-}
-
-function pool_stats() {
-    echo "$(jcli rest v0 stake-pool get $(cat ~/files/node_secret.yaml | grep node_id | awk -F: '{print $2 }') -h http://127.0.0.1:${REST_PORT}/api)"
-}
+#function check_peers() {
+#    sed -e '/ address/!d' -e '/#/d' -e 's@^.*/ip./\([^/]*\)/tcp/\([0-9]*\).*@\1 \2@' ~/files/node-config.yaml | \
+#    while read addr port
+#    do 
+#        tcpping -x 1 $addr $port
+#    done
+#}
+#
+#function leader_logs() {
+#    echo "Has this node been scheduled to be leader?"
+#    echo "$(jcli rest v0 leaders logs get -h http://127.0.0.1:${REST_PORT}/api)"
+#}
+#
+#function schedule() {
+#    echo "Which block dates are this node scheduled to generate a block during this epoch?"
+#    leader_logs | grep scheduled_at_date | cut -d'"' -f2 | cut -d'.' -f2 | sort -g
+#}
+#
+#function when() {
+#    leader_logs | grep scheduled_at_time | sort
+#}
+#
+#function elections() {
+#    echo "How many slots has this node been scheduled to be leader?"
+#    echo "$(jcli rest v0 leaders logs get -h http://127.0.0.1:${REST_PORT}/api | grep created_at_time | wc -l)"
+#}
+#
+#function pool_stats() {
+#    echo "$(jcli rest v0 stake-pool get $(cat ~/files/node_secret.yaml | grep node_id | awk -F: '{print $2 }') -h http://127.0.0.1:${REST_PORT}/api)"
+#}
 
 function problems() {
     grep -E -i 'cannot|stuck|exit|unavailable' ~/logs/node.out
@@ -152,10 +226,10 @@ function disk() {
     dd if=/dev/zero of=/tmp/output conv=fdatasync bs=384k count=1k; rm -f /tmp/output
 }
 
-function frags() {
-    echo "What is the current frag count?"
-    jcli rest v0 message logs -h http://127.0.0.1:${REST_PORT}/api | grep "frag" | wc -l
-}
+#function frags() {
+#    echo "What is the current frag count?"
+#    jcli rest v0 message logs -h http://127.0.0.1:${REST_PORT}/api | grep "frag" | wc -l
+#}
 
 function portsentry_stats() {
     sudo grep portsentry /var/log/syslog | awk '{print $6}' | sort | uniq -c
@@ -165,9 +239,9 @@ function tip() {
     grep tip ~/logs/node.out
 }
 
-function settings() {
-    echo "$(jcli rest v0 settings get --host ${REST_URL})"
-}
+#function settings() {
+#    echo "$(jcli rest v0 settings get --host ${REST_URL})"
+#}
 
 function current_blocktime() {
 	chainstartdate=$(settings | grep "block0Time:" | awk '{print $2}' | tr -d '"' | xargs -I{} date "+%s" -d {})
